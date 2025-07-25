@@ -1,21 +1,18 @@
-const GAS_ENDPOINT = "https://script.google.com/macros/s/AKfycbzOBhvw1KkvtSjPqz79m0N63zgk1gnZL_J-Nw-2LEkJyjSmVc-BSuhJMayRfoB2lujx/exec";
-
-// --- SECTION CONTROL ---
+// --- CONFIGURATIONS ---
+const GAS_ENDPOINT = "https://script.google.com/macros/s/AKfycbzOBhvw1KkvtSjPqz79m0N63zgk1gnZL_J-Nw-2LEkJyjSmVc-BSuhJMayRfoB2lujx/exec"; // ganti dengan URL Anda
 const iframeSrc = {
   dashboard: "https://lookerstudio.google.com/embed/reporting/6eeec8b8-2588-4eb2-bcdb-e65cb694c099/page/Gv9RF",
 };
-
 const sectionTitle = {
   dashboard: "General",
   upload: "Upload Progress Report"
 };
-
 const sectionDesc = {
   dashboard: "Monitoring utama proyek, menampilkan overview performa dan status terkini seluruh aspek proyek.",
   upload: "Upload laporan dan lihat daftar dokumen pada folder Google Drive."
 };
 
-// --- Render Section ---
+// --- RENDER SECTION ---
 function showSection(section) {
   document.getElementById('main-title').innerText = sectionTitle[section];
   document.getElementById('main-desc').innerText = sectionDesc[section];
@@ -24,7 +21,7 @@ function showSection(section) {
   document.getElementById('upload-drive-wrapper').style.display = "none";
 
   if (section === 'dashboard') {
-    document.getElementById('iframe-container').style.display = "";
+    document.getElementById('iframe-container').style.display = "block";
     document.getElementById('main-iframe').src = iframeSrc[section];
   } else if (section === 'upload') {
     document.getElementById('upload-drive-wrapper').style.display = "flex";
@@ -42,18 +39,17 @@ document.addEventListener('DOMContentLoaded', function () {
       showSection(section);
     });
   });
-
   showSection('dashboard');
 });
 
-// --- Upload to Cloudinary and Send to GAS ---
+// --- UPLOAD TO CLOUDINARY AND SAVE TO GOOGLE DRIVE ---
 async function uploadToCloudinary() {
   const file = document.getElementById('fileInput').files[0];
   if (!file) return alert("Silakan pilih file.");
 
   const formData = new FormData();
   formData.append('file', file);
-  formData.append('upload_preset', 'project_unsigned');
+  formData.append('upload_preset', 'project_unsigned'); // pastikan preset ini ada di Cloudinary
 
   try {
     const res = await fetch("https://api.cloudinary.com/v1_1/doicm5hba/auto/upload", {
@@ -64,27 +60,36 @@ async function uploadToCloudinary() {
     const data = await res.json();
     if (!data.secure_url) throw new Error("Gagal upload ke Cloudinary");
 
-    document.getElementById('uploadStatus').innerHTML = `<span style="color:green;">✅ Berhasil diunggah: <a href="${data.secure_url}" target="_blank">${data.original_filename}</a></span>`;
+    document.getElementById('uploadStatus').innerHTML = `
+      <span style="color:green;">✅ Berhasil diunggah: 
+        <a href="${data.secure_url}" target="_blank">${data.original_filename}</a>
+      </span>`;
 
-    // Simpan ke Google Drive lewat GAS
-    await fetch(GAS_ENDPOINT, {
+    // Kirim ke GAS untuk simpan link ke Google Drive
+    const gasRes = await fetch(GAS_ENDPOINT, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         fileUrl: data.secure_url,
         fileName: data.original_filename,
-        mimeType: data.resource_type === "image" ? "image/jpeg" : "application/octet-stream"
-      }),
-      headers: { 'Content-Type': 'application/json' }
+        mimeType: file.type || "application/octet-stream"
+      })
     });
 
-    loadGalleryFromDrive();
+    const gasData = await gasRes.json();
+    if (gasData.status === "success") {
+      loadGalleryFromDrive();
+    } else {
+      throw new Error(gasData.message || "Gagal simpan ke Google Drive");
+    }
+
   } catch (err) {
     console.error(err);
-    document.getElementById('uploadStatus').innerHTML = `<span style="color:red;">❌ Gagal upload.</span>`;
+    document.getElementById('uploadStatus').innerHTML = `<span style="color:red;">❌ Gagal upload: ${err.message}</span>`;
   }
 }
 
-// --- Gallery from Drive via GAS ---
+// --- LOAD FILES FROM DRIVE ---
 async function loadGalleryFromDrive() {
   try {
     const res = await fetch(GAS_ENDPOINT);
@@ -92,16 +97,16 @@ async function loadGalleryFromDrive() {
 
     if (!Array.isArray(files)) throw new Error("Invalid response");
 
-    const galleryHTML = files.map(f => `
-      <div style="margin-bottom:12px;display:flex;align-items:center;gap:10px;">
+    const html = files.map(file => `
+      <div style="margin-bottom:10px;display:flex;align-items:center;gap:10px;">
         <img src="https://www.gstatic.com/images/icons/material/system/2x/insert_drive_file_black_24dp.png" width="20">
-        <a href="${f.url}" target="_blank">${f.name}</a>
+        <a href="${file.url}" target="_blank">${file.name}</a>
       </div>
     `).join('');
 
-    document.getElementById('galleryDrive').innerHTML = galleryHTML || "<span>Tidak ada file.</span>";
+    document.getElementById('galleryDrive').innerHTML = html || "<span>Tidak ada file ditemukan.</span>";
   } catch (err) {
-    console.error("Gagal load file dari Drive:", err);
-    document.getElementById('galleryDrive').innerText = "❌ Gagal load file dari Google Drive.";
+    console.error(err);
+    document.getElementById('galleryDrive').innerHTML = `<span style="color:red;">❌ Gagal load file: ${err.message}</span>`;
   }
 }
